@@ -1,0 +1,401 @@
+{
+  "name": "Team Agent with Email",
+  "nodes": [
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        100,
+        240
+      ],
+      "id": "8f18eaeb-c28d-4324-ab20-250a25bbbbbf",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are an assistant that processes team-related queries and determines required actions. Analyze the user query and extract: 1. Department-designation pairs for database lookup 2. Action type (email, notification, etc.) 3. Context/subject matter 4. Any specific message content. The database has departments: [\"headTable\", \"technical\", \"prHr\", \"design\", \"rAndD\", \"contentAndMedia\", \"marketing\", \"logisticsAndOperations\", \"communication\", \"videography\", \"innovation\", \"sponsorship\", \"creativity\", \"offstage\"]. Designations: [\"lead\", \"colead\", \"associate\"] (and for headTable: [\"president\", \"vicePresident\", \"secretary\"]). Output JSON format: {\"action\": \"email\" or \"notify\" or \"query\", \"targets\": [{\"department\": \"technical\", \"designation\": \"lead\"}], \"subject\": \"extracted or inferred subject\", \"context\": \"additional context like event names, deadlines, etc.\", \"urgency\": \"low\" or \"medium\" or \"high\", \"customMessage\": \"any specific message content from user\"}. For queries without clear action intent, set action to \"query\"."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "51edeb8a-3003-426d-a466-323c997319ef",
+      "name": "Enhanced AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "156237f2-a22e-41c6-93f2-bb2879e2437a",
+      "name": "When chat message received",
+      "webhookId": "fcfccd82-4e90-40c7-9b9d-35fb36ce12b0"
+    },
+    {
+      "parameters": {
+        "sessionKey": "={{ $json.sessionId }}"
+      },
+      "id": "e2bf4073-1cd5-45d8-829a-799fe805619d",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1,
+      "position": [
+        320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output;\nconst cleaned = raw.replace(/^```json\\n/, '').replace(/\\n```$/, '');\nconst parsed = JSON.parse(cleaned);\nconst actionType = parsed.action || 'query';\nconst subject = parsed.subject || 'Team Communication';\nconst context = parsed.context || '';\nconst urgency = parsed.urgency || 'medium';\nconst customMessage = parsed.customMessage || '';\nconst targets = parsed.targets || [];\nconst items = targets.map(target => ({ json: { ...target, actionType, subject, context, urgency, customMessage } }));\nif (items.length === 0) { items.push({ json: { actionType, subject, context, urgency, customMessage, department: '', designation: '' } }); }\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        0
+      ],
+      "id": "69878d99-7e4f-42e4-b40f-14505bd11e78",
+      "name": "Parse Query Response"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.actionType }}",
+              "rightValue": "email",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ],
+      "id": "action-router",
+      "name": "Action Router"
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "e-cell-vishnu-website",
+        "query": "={\"structuredQuery\": {\"where\": {\"compositeFilter\": {\"op\": \"AND\", \"filters\": [{\"fieldFilter\": {\"field\": {\"fieldPath\": \"department\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.department }}\"}}}, {\"fieldFilter\": {\"field\": {\"fieldPath\": \"designation\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.designation }}\"}}}]}}, \"from\": [{\"collectionId\": \"teams\"}]}}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        980,
+        -100
+      ],
+      "id": "38d40a23-465c-42e8-8283-fabaccf445a4",
+      "name": "Get Team Member Details",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1180,
+        -100
+      ],
+      "id": "email-gemini",
+      "name": "Email Composer AI",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Compose a professional email with the following details: Recipient: {{ $('Get Team Member Details').item.json.document.fields.name.stringValue || 'Team Member' }}, Department: {{ $json.department }}, Designation: {{ $json.designation }}, Subject: {{ $json.subject }}, Context: {{ $json.context }}, Urgency: {{ $json.urgency }}, Custom Message: {{ $json.customMessage }}. Please write a professional email that is appropriate for the urgency level and context provided.",
+        "options": {
+          "systemMessage": "You are a professional email composer for organizational communications. Compose emails that are: 1. Professional and respectful in tone 2. Clear and concise 3. Appropriate for the urgency level (low=casual, medium=professional, high=urgent) 4. Include relevant context and call-to-action 5. Properly formatted with greeting, body, and closing. For different urgency levels: Low: Friendly, casual tone, Medium: Professional, standard business tone, High: Urgent but respectful, clear action required. Always include the recipient's name/designation in the greeting and sign off appropriately."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        -100
+      ],
+      "id": "email-composer",
+      "name": "Email Composer Agent"
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "toEmail": "={{ $('Get Team Member Details').item.json.document.fields.email.stringValue }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "text",
+        "message": "={{ $('Email Composer Agent').item.json.output }}"
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [
+        1580,
+        -100
+      ],
+      "id": "send-email",
+      "name": "Send Email",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "your-gmail-oauth2-id",
+          "name": "Gmail OAuth2 account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "e-cell-vishnu-website",
+        "query": "={\"structuredQuery\": {\"where\": {\"compositeFilter\": {\"op\": \"AND\", \"filters\": [{\"fieldFilter\": {\"field\": {\"fieldPath\": \"department\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.department }}\"}}}, {\"fieldFilter\": {\"field\": {\"fieldPath\": \"designation\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.designation }}\"}}}]}}, \"from\": [{\"collectionId\": \"teams\"}]}}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        980,
+        120
+      ],
+      "id": "query-only-firestore",
+      "name": "Query Team Details",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\nconst teamMembers = [];\nfor (const result of results) {\n  if (result.json.document && result.json.document.fields) {\n    const fields = result.json.document.fields;\n    teamMembers.push({\n      name: fields.name?.stringValue || 'N/A',\n      email: fields.email?.stringValue || 'N/A',\n      department: fields.department?.stringValue || 'N/A',\n      designation: fields.designation?.stringValue || 'N/A',\n      phone: fields.phone?.stringValue || 'N/A'\n    });\n  }\n}\nconst response = {\n  action: 'query_complete',\n  totalMembers: teamMembers.length,\n  members: teamMembers,\n  message: teamMembers.length > 0 ? `Found ${teamMembers.length} team member(s)` : 'No team members found matching the criteria'\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1180,
+        120
+      ],
+      "id": "format-query-response",
+      "name": "Format Query Response"
+    },
+    {
+      "parameters": {
+        "jsCode": "const emailResult = $('Send Email').item.json;\nconst teamMember = $('Get Team Member Details').item.json;\nconst queryData = $input.item.json;\nconst response = {\n  action: 'email_sent',\n  success: true,\n  recipient: {\n    name: teamMember.document?.fields?.name?.stringValue || 'Unknown',\n    email: teamMember.document?.fields?.email?.stringValue || 'Unknown',\n    department: queryData.department,\n    designation: queryData.designation\n  },\n  subject: queryData.subject,\n  context: queryData.context,\n  urgency: queryData.urgency,\n  emailId: emailResult.id || 'N/A',\n  message: `Email successfully sent to ${teamMember.document?.fields?.name?.stringValue || 'team member'}`\n};\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        -100
+      ],
+      "id": "format-email-response",
+      "name": "Format Email Response"
+    },
+    {
+      "parameters": {
+        "content": "Enhanced Team Agent Workflow Features: 1. Intelligent query parsing 2. Action detection (email/query) 3. Team member lookup 4. AI-powered email composition 5. Automated email sending 6. Formatted responses",
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -200
+      ],
+      "id": "workflow-description",
+      "name": "Workflow Description"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Enhanced AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enhanced AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Query Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Enhanced AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Enhanced AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Query Response": {
+      "main": [
+        [
+          {
+            "node": "Action Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Router": {
+      "main": [
+        [
+          {
+            "node": "Get Team Member Details",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Query Team Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Team Member Details": {
+      "main": [
+        [
+          {
+            "node": "Email Composer Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Composer AI": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Email Composer Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Composer Agent": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Format Email Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Team Details": {
+      "main": [
+        [
+          {
+            "node": "Format Query Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "enhanced-team-agent-v1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "enhanced-team-agent-instance"
+  },
+  "id": "EnhancedTeamAgent",
+  "tags": [
+    "team-management",
+    "email-automation",
+    "ai-assistant"
+  ]
+}
