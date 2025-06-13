@@ -1,0 +1,216 @@
+{
+  "name": "Team Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        100,
+        240
+      ],
+      "id": "8f18eaeb-c28d-4324-ab20-250a25bbbbbf",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are an assistant that extracts department and designation pairs from user queries to fetch data from a Firestore database.\n\nThe database has a teams collection with documents containing the following fields:\n\ndepartment — enum values:\n[\"headTable\", \"technical\", \"prHr\", \"design\", \"rAndD\", \"contentAndMedia\", \"marketing\", \"logisticsAndOperations\", \"communication\", \"videography\", \"innovation\", \"sponsorship\", \"creativity\", \"offstage\"]\n\ndesignation — enum values:\n\nFor most departments: [\"lead\", \"colead\", \"associate\"]\n\nFor headTable only: [\"president\", \"vicePresident\", \"secretary\"]\n\nOutput Rules:\nFor queries mentioning specific department-designation pairs (e.g., \"tech lead, pr head, design lead\"), extract and return a JSON array of objects in the format:\n\njson\n\n[\n  {\"department\": \"technical\", \"designation\": \"lead\"},\n  {\"department\": \"prHr\", \"designation\": \"lead\"},\n  {\"department\": \"design\", \"designation\": \"lead\"}\n]\nFor queries mentioning only a department without any designation (e.g., \"send emails to all technical team\"), return all possible designation values for that department.\nExample output:\n\njson\n\n[\n  {\"department\": \"technical\", \"designation\": \"lead\"},\n  {\"department\": \"technical\", \"designation\": \"colead\"},\n  {\"department\": \"technical\", \"designation\": \"associate\"}\n]\nFor unclear or unrelated queries with no valid department or designation identified, return an empty array:\n\njson\n[]\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "51edeb8a-3003-426d-a466-323c997319ef",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "156237f2-a22e-41c6-93f2-bb2879e2437a",
+      "name": "When chat message received",
+      "webhookId": "fcfccd82-4e90-40c7-9b9d-35fb36ce12b0"
+    },
+    {
+      "parameters": {
+        "description": "Validates and normalizes the AI Agent’s output to ensure department and designation match Firestore’s enum values.",
+        "jsCode": "const input = $node[\"AI Agent\"].json.output || [];\nconst validDepartments = [\n  \"headTable\", \"technical\", \"prHr\", \"design\", \"rAndD\", \"contentAndMedia\",\n  \"marketing\", \"logisticsAndOperations\", \"communication\", \"videography\",\n  \"innovation\", \"sponsorship\", \"creativity\", \"offstage\"\n];\nconst validDesignations = [\"lead\", \"colead\", \"associate\", \"president\", \"vicePresident\", \"secretary\"];\n\nconst departmentMap = {\n  \"tech\": \"technical\",\n  \"pr\": \"prHr\",\n  \"hr\": \"prHr\",\n  \"rnd\": \"rAndD\",\n  \"content\": \"contentAndMedia\",\n  \"media\": \"contentAndMedia\",\n  \"logistics\": \"logisticsAndOperations\",\n  \"operations\": \"logisticsAndOperations\",\n  \"video\": \"videography\"\n};\n\nconst results = [];\n\n// Handle both single object and array inputs\nconst inputArray = Array.isArray(input) ? input : [input];\n\nfor (let item of inputArray) {\n  let department = item.department ? item.department.toLowerCase() : \"\";\n  let designation = item.designation ? item.designation.toLowerCase() : \"\";\n\n  // If only designation is provided and it's a headTable-specific designation\n  if (!department && [\"president\", \"vicepresident\", \"secretary\"].includes(designation)) {\n    department = \"headTable\";\n  }\n\n  // Normalize department\n  department = departmentMap[department] || department;\n\n  // Validate and add to results if both are valid\n  if (validDepartments.includes(department) && validDesignations.includes(designation)) {\n    results.push({ department, designation });\n  }\n}\n\nreturn [{ json: { queries: results } }];"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.2,
+      "position": [
+        500,
+        240
+      ],
+      "id": "2f7a99c9-ccf8-4781-9a6e-c0c15c49dabc",
+      "name": "Code Tool"
+    },
+    {
+      "parameters": {
+        "sessionKey": "={{ $json.sessionId }}"
+      },
+      "id": "e2bf4073-1cd5-45d8-829a-799fe805619d",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1,
+      "position": [
+        320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output;\n\n// Remove code block formatting\nconst cleaned = raw\n  .replace(/^```json\\n/, '')\n  .replace(/\\n```$/, '');\n\n// Parse to JSON\nconst parsed = JSON.parse(cleaned);\n\n// Ensure it's always an array\nconst queries = Array.isArray(parsed) ? parsed : [parsed];\n\nconst items = queries.map(query => ({\n  json: query\n}));\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        580,
+        0
+      ],
+      "id": "69878d99-7e4f-42e4-b40f-14505bd11e78",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "e-cell-vishnu-website",
+        "query": "={\n  \"structuredQuery\": {\n    \"where\": {\n      \"compositeFilter\": {\n        \"op\": \"AND\",\n        \"filters\": [\n          {\n            \"fieldFilter\": {\n              \"field\": { \"fieldPath\": \"department\" },\n              \"op\": \"EQUAL\",\n              \"value\": { \"stringValue\": \"{{ $json.department }}\" }\n            }\n          },\n          {\n            \"fieldFilter\": {\n              \"field\": { \"fieldPath\": \"designation\" },\n              \"op\": \"EQUAL\",\n              \"value\": { \"stringValue\": \"{{ $json.designation }}\" }\n            }\n          }\n        ]\n      }\n    },\n    \"from\": [\n      {\n        \"collectionId\": \"teams\"\n      }\n    ]\n  }\n}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [
+        780,
+        0
+      ],
+      "id": "38d40a23-465c-42e8-8283-fabaccf445a4",
+      "name": "Google Cloud Firestore",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "This is team based on query it will retrieve the team members details from the database",
+        "color": 5
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        240,
+        -100
+      ],
+      "id": "6f2b3201-1585-4217-989b-df33b7c5549e",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Google Cloud Firestore",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Cloud Firestore": {
+      "main": [
+        []
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "0c4da029-9387-4654-8c7c-a64a5cabba22",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "250c8b74a338318767c63314541365109b8bae7884022431d1006ca3ca27cbe9"
+  },
+  "id": "UMpqohXNWgNoqJ1V",
+  "tags": []
+}
