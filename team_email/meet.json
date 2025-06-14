@@ -1,0 +1,659 @@
+{
+  "name": "Enhanced Team Email & Meet Agent",
+  "nodes": [
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [-540, 520],
+      "id": "main-gemini-model",
+      "name": "Main Gemini Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}",
+        "options": {
+          "systemMessage": "You are an intelligent team management assistant that processes queries and determines actions for internal communications, scheduling, and database operations.\n\nThe Firestore database has a 'teams' collection. Each document includes:\n- department: one of [\"headTable\", \"technical\", \"prHr\", \"design\", \"rAndD\", \"contentAndMedia\", \"marketing\", \"logisticsAndOperations\", \"communication\", \"videography\", \"innovation\", \"sponsorship\", \"creativity\", \"offstage\"]\n- designation: For most departments: [\"lead\", \"colead\", \"associate\"] | For headTable: [\"president\", \"vicePresident\", \"secretary\"]\n- name: Full name of the person\n- email: Email address\n- phone: Phone number\n\n## EXTRACTION RULES:\n\n### Department + Designation Extraction (targets)\n1. If explicit department-designation pair mentioned (e.g., \"tech lead\", \"pr colead\") → extract as-is\n2. If only department mentioned (e.g., \"technical team\") → return all designations for that department\n3. If unclear or no identifiable department → return empty array\n\n### Action Inference\n- Communication intent (\"send email\", \"notify\", \"remind\") → \"email\"\n- Meeting/scheduling intent (\"schedule meeting\", \"set up call\", \"book time\") → \"schedule\"\n- Information request (\"who is\", \"show me\", \"list\") → \"query\"\n- General conversation → \"chat\"\n\n### Context Analysis\n- Extract subject, urgency level, custom messages\n- Identify time references (\"tomorrow\", \"4pm\", \"next week\")\n- Parse meeting duration hints\n\n## RESPONSE FORMAT (Always JSON):\n```json\n{\n  \"action\": \"email\" | \"schedule\" | \"query\" | \"chat\",\n  \"targets\": [\n    {\"department\": \"technical\", \"designation\": \"lead\"}\n  ],\n  \"subject\": \"inferred subject\",\n  \"context\": \"extracted context\",\n  \"urgency\": \"low\" | \"medium\" | \"high\",\n  \"customMessage\": \"message body if provided\",\n  \"timeReference\": \"time info for scheduling\",\n  \"meetingDuration\": \"duration hint if provided\"\n}\n```"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [-420, 280],
+      "id": "query-parser-agent",
+      "name": "Query Parser Agent"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [-640, 280],
+      "id": "chat-trigger",
+      "name": "When chat message received",
+      "webhookId": "2f5a7de3-1f3f-4801-94fe-9628d88e25ef"
+    },
+    {
+      "parameters": {
+        "sessionKey": "={{ $json.sessionId }}"
+      },
+      "id": "memory-buffer",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1,
+      "position": [-320, 580]
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output;\n\n// Clean JSON wrapper\nconst cleaned = raw.replace(/^```json\\n/, '').replace(/\\n```$/, '').trim();\n\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (err) {\n  console.error('JSON Parse Error:', err.message);\n  // Fallback parsing\n  parsed = {\n    action: 'chat',\n    targets: [],\n    subject: 'General Query',\n    context: raw,\n    urgency: 'medium',\n    customMessage: '',\n    timeReference: '',\n    meetingDuration: '1 hour'\n  };\n}\n\n// Extract and validate\nconst actionType = parsed.action || 'chat';\nconst targets = Array.isArray(parsed.targets) ? parsed.targets : [];\nconst subject = parsed.subject || 'Team Communication';\nconst context = parsed.context || '';\nconst urgency = parsed.urgency || 'medium';\nconst customMessage = parsed.customMessage || '';\nconst timeReference = parsed.timeReference || '';\nconst meetingDuration = parsed.meetingDuration || '1 hour';\n\n// Create output items for each target\nconst items = targets.length > 0 ? targets.map((target, index) => ({\n  json: {\n    id: index + 1,\n    department: target.department || '',\n    designation: target.designation || '',\n    actionType,\n    subject,\n    context,\n    urgency,\n    customMessage,\n    timeReference,\n    meetingDuration,\n    originalInput: $('When chat message received').first().json.chatInput\n  }\n})) : [{\n  json: {\n    id: 1,\n    department: '',\n    designation: '',\n    actionType,\n    subject,\n    context,\n    urgency,\n    customMessage,\n    timeReference,\n    meetingDuration,\n    originalInput: $('When chat message received').first().json.chatInput\n  }\n}];\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-60, 280],
+      "id": "parse-response",
+      "name": "Parse AI Response"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "email",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "email"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "schedule",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "schedule"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "query",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "query"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.actionType }}",
+                    "rightValue": "chat",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "chat"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [200, 280],
+      "id": "action-router",
+      "name": "Action Router"
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "e-cell-vishnu-website",
+        "query": "={\"structuredQuery\": {\"where\": {\"compositeFilter\": {\"op\": \"AND\", \"filters\": [{\"fieldFilter\": {\"field\": {\"fieldPath\": \"department\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.department }}\"}}}, {\"fieldFilter\": {\"field\": {\"fieldPath\": \"designation\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.designation }}\"}}}]}}, \"from\": [{\"collectionId\": \"teams\"}]}}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [480, 160],
+      "id": "get-email-recipients",
+      "name": "Get Email Recipients",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "e-cell-vishnu-website",
+        "query": "={\"structuredQuery\": {\"where\": {\"compositeFilter\": {\"op\": \"AND\", \"filters\": [{\"fieldFilter\": {\"field\": {\"fieldPath\": \"department\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.department }}\"}}}, {\"fieldFilter\": {\"field\": {\"fieldPath\": \"designation\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.designation }}\"}}}]}}, \"from\": [{\"collectionId\": \"teams\"}]}}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [480, 280],
+      "id": "get-meeting-attendees",
+      "name": "Get Meeting Attendees",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "e-cell-vishnu-website",
+        "query": "={\"structuredQuery\": {\"where\": {\"compositeFilter\": {\"op\": \"AND\", \"filters\": [{\"fieldFilter\": {\"field\": {\"fieldPath\": \"department\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.department }}\"}}}, {\"fieldFilter\": {\"field\": {\"fieldPath\": \"designation\"}, \"op\": \"EQUAL\", \"value\": {\"stringValue\": \"{{ $json.designation }}\"}}}]}}, \"from\": [{\"collectionId\": \"teams\"}]}}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 1.1,
+      "position": [480, 400],
+      "id": "get-query-data",
+      "name": "Get Query Data",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [700, 40],
+      "id": "email-composer-model",
+      "name": "Email Composer Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Compose a professional email for:\nRecipient: {{ $json.name }} ({{ $json.email }})\nDepartment: {{ $json.department }}\nDesignation: {{ $json.designation }}\nSubject: {{ $('Parse AI Response').item.json.subject }}\nContext: {{ $('Parse AI Response').item.json.context }}\nUrgency: {{ $('Parse AI Response').item.json.urgency }}\nCustom Message: {{ $('Parse AI Response').item.json.customMessage }}\nOriginal Request: {{ $('Parse AI Response').item.json.originalInput }}",
+        "options": {
+          "systemMessage": "You are a professional email composer for organizational communications. Create emails that are:\n\n1. **Professional and respectful** in tone\n2. **Clear and concise** with specific call-to-action\n3. **Appropriate for urgency level**:\n   - Low: Friendly, casual tone\n   - Medium: Professional, standard business tone  \n   - High: Urgent but respectful, clear action required\n4. **Properly formatted** with greeting, body, and closing\n5. **Include recipient's name/designation** in greeting\n6. **Sign off with \"Best regards, Team E-Cell\"**\n\n**CRITICAL**: Return ONLY valid JSON in this exact format:\n```json\n{\n  \"subject\": \"Email subject line\",\n  \"body\": \"Complete email body with proper formatting\",\n  \"recipient\": \"recipient@email.com\"\n}\n```\n\nNo additional text, explanations, or formatting outside the JSON."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [800, 160],
+      "id": "email-composer-agent",
+      "name":"стройки",
+
+"System": "Email Composer Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output;\n\n// Clean and parse JSON\nconst cleaned = raw.replace(/^```json\\n/, '').replace(/\\n```$/, '').trim();\n\nlet emailData;\ntry {\n  emailData = JSON.parse(cleaned);\n} catch (err) {\n  console.error('Email JSON Parse Error:', err);\n  // Fallback\n  emailData = {\n    subject: 'Team Communication',\n    body: 'Hello,\\n\\nThis is a message from Team E-Cell.\\n\\nBest regards,\\nTeam E-Cell',\n    recipient: 'team@company.com'\n  };\n}\n\nreturn { json: emailData };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 160],
+      "id": "parse-email-json",
+      "name": "Parse Email JSON"
+    },
+    {
+      "parameters": {
+        "subject": "={{ $json.subject }}",
+        "message": "={{ $json.body }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 1,
+      "position": [1200, 160],
+      "id": "send-email",
+      "name": "Send Email",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "K2FJCacoRq9WcjdZ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash-exp",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [700, 200],
+      "id": "meeting-scheduler-model",
+      "name": "Meeting Scheduler Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Schedule a meeting with the following details:\nAttendees Data: {{ JSON.stringify($input.all().map(item => ({ name: item.json.document?.fields?.name?.stringValue, email: item.json.document?.fields?.email?.stringValue, department: item.json.document?.fields?.department?.stringValue, designation: item.json.document?.fields?.designation?.stringValue }))) }}\nRequest Context: {{ $('Parse AI Response').item.json.context }}\nTime Reference: {{ $('Parse AI Response').item.json.timeReference }}\nDuration: {{ $('Parse AI Response').item.json.meetingDuration }}\nSubject: {{ $('Parse AI Response').item.json.subject }}\nUrgency: {{ $('Parse AI Response').item.json.urgency }}\nOriginal Input: {{ $('Parse AI Response').item.json.originalInput }}",
+        "options": {
+          "systemMessage": "You are an intelligent meeting scheduler. Process meeting requests and generate structured data for Google Calendar integration.\n\n**Current Date/Time**: {{ new Date().toISOString() }}\n\n**Instructions**:\n1. **Parse time references** (\"tomorrow\", \"4pm\", \"next week\", etc.) and convert to ISO format\n2. **Default to 4 PM today** if time is unclear\n3. **Set duration to exactly 1 hour** unless specified\n4. **Generate professional meeting title** based on department/subject\n5. **Create detailed description** with context and attendees\n6. **Extract attendee emails** from provided data\n7. **Handle urgency appropriately**\n\n**Time Parsing Rules**:\n- \"today\" → Today at 4 PM\n- \"tomorrow\" → Tomorrow at 4 PM  \n- \"4pm\", \"16:00\" → Today at specified time\n- \"tomorrow 2pm\" → Tomorrow at 2 PM\n- \"next week\" → Next Monday at 4 PM\n\n**CRITICAL**: Return ONLY valid JSON:\n```json\n{\n  \"title\": \"DEPARTMENT MEETING - Subject\",\n  \"description\": \"Detailed meeting description with agenda and attendees\",\n  \"startTime\": \"2025-06-15T16:00:00.000Z\",\n  \"endTime\": \"2025-06-15T17:00:00.000Z\",\n  \"attendees\": [\"email1@domain.com\", \"email2@domain.com\"],\n  \"location\": \"Google Meet (link will be generated)\"\n}\n```"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [800, 280],
+      "id": "meeting-scheduler-agent",
+      "name": "Meeting Scheduler Agent"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $input.first().json.output;\n\n// Clean and parse JSON\nconst cleaned = raw.replace(/^```json\\n/, '').replace(/\\n```$/, '').trim();\n\nlet meetingData;\ntry {\n  meetingData = JSON.parse(cleaned);\n} catch (err) {\n  console.error('Meeting JSON Parse Error:', err);\n  // Fallback with proper date handling\n  const now = new Date();\n  const startTime = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour from now\n  const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); // 1 hour duration\n  \n  meetingData = {\n    title: 'Team Meeting',\n    description: 'Scheduled team meeting',\n    startTime: startTime.toISOString(),\n    endTime: endTime.toISOString(),\n    attendees: ['team@company.com'],\n    location: 'Google Meet'\n  };\n}\n\nreturn { json: meetingData };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1000, 280],
+      "id": "parse-meeting-json",
+      "name": "Parse Meeting JSON"
+    },
+    {
+      "parameters": {
+        "calendar": {
+          "__rl": true,
+          "value": "dev.team@vishnu.edu.in",
+          "mode": "list",
+          "cachedResultName": "dev.team@vishnu.edu.in"
+        },
+        "title": "={{ $json.title }}",
+        "start": "={{ $json.startTime }}",
+        "end": "={{ $json.endTime }}",
+        "additionalFields": {
+          "description": "={{ $json.description }}",
+          "attendees": "={{ $json.attendees.join(',') }}",
+          "useDefaultReminders": false,
+          "reminders": {
+            "values": [
+              {
+                "method": "email",
+                "minutes": 30
+              },
+              {
+                "method": "popup",
+                "minutes": 10
+              }
+            ]
+          }
+        }
+      },
+      "type": "n8n-nodes-base.googleCalendar",
+      "typeVersion": 1.3,
+      "position": [1200, 280],
+      "id": "create-calendar-event",
+      "name": "Create Calendar Event",
+      "credentials": {
+        "googleCalendarOAuth2Api": {
+          "id": "SoGli5XxH4VUUOr5",
+          "name": "Google Calendar account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all();\nconst teamMembers = [];\n\nfor (const result of results) {\n  if (result.json.document && result.json.document.fields) {\n    const fields = result.json.document.fields;\n    teamMembers.push({\n      name: fields.name?.stringValue || 'N/A',\n      email: fields.email?.stringValue || 'N/A', \n      department: fields.department?.stringValue || 'N/A',\n      designation: fields.designation?.stringValue || 'N/A',\n      phone: fields.phone?.stringValue || 'N/A'\n    });\n  }\n}\n\nconst response = {\n  action: 'query_complete',\n  totalMembers: teamMembers.length,\n  members: teamMembers,\n  message: teamMembers.length > 0 \n    ? `Found ${teamMembers.length} team member(s)` \n    : 'No team members found matching the criteria',\n  query: {\n    department: $('Parse AI Response').item.json.department,\n    designation: $('Parse AI Response').item.json.designation,\n    context: $('Parse AI Response').item.json.context\n  }\n};\n\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 400],
+      "id": "format-query-response",
+      "name": "Format Query Response"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('When chat message received').item.json.chatInput }}",
+        "options": {
+          "systemMessage": "You are a helpful team assistant. The user is having a general conversation or asking questions that don't require specific actions like sending emails or scheduling meetings.\n\nProvide helpful, conversational responses about:\n- Team information and structure\n- General E-Cell activities\n- Answering questions about departments and roles\n- Providing guidance and support\n- Having friendly conversations\n\nKeep responses natural, helpful, and engaging. If the user needs specific actions (email, meetings, team queries), suggest they use more specific commands.\n\nRespond in a friendly, professional tone as a team assistant would."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [480, 520],
+      "id": "chat-assistant",
+      "name": "Chat Assistant"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Determine response type and format final output\nconst actionType = $('Parse AI Response').item.json.actionType;\nlet response;\n\nswitch(actionType) {\n  case 'email':\n    const emailResult = $('Send Email').first()?.json;\n    response = {\n      action: 'email_sent',\n      success: true,\n      message: 'Email sent successfully!',\n      details: {\n        subject: $('Parse Email JSON').first().json.subject,\n        recipient: $('Parse Email JSON').first().json.recipient,\n        emailId: emailResult?.id || 'N/A'\n      }\n    };\n    break;\n    \n  case 'schedule':\n    const meetingResult = $('Create Calendar Event').first()?.json;\n    response = {\n      action: 'meeting_scheduled', \n      success: true,\n      message: 'Meeting scheduled successfully!',\n      details: {\n        title: $('Parse Meeting JSON').first().json.title,\n        startTime: $('Parse Meeting JSON').first().json.startTime,\n        meetLink: meetingResult?.hangoutLink || meetingResult?.htmlLink || 'Will be generated',\n        eventId: meetingResult?.id || 'N/A'\n      }\n    };\n    break;\n    \n  case 'query':\n    const queryResult = $('Format Query Response').first().json;\n    response = queryResult;\n    break;\n    \n  case 'chat':\n    const chatResult = $('Chat Assistant').first().json;\n    response = {\n      action: 'chat_response',\n      message: chatResult.output || 'Hello! How can I help you with team management today?'\n    };\n    break;\n    \n  default:\n    response = {\n      action: 'unknown',\n      message: 'I\\'m not sure how to help with that. Try asking about team members, sending emails, or scheduling meetings!'\n    };\n}\n\nreturn [{ json: response }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 320],
+      "id": "final-response-formatter",
+      "name": "Final Response Formatter"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1600, 320],
+      "id": "webhook-response",
+      "name": "Webhook Response"
+    }
+  ],
+  "connections": {
+    "Main Gemini Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Query Parser Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Query Parser Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When chat message received": {
+      "main": [
+        [
+          {
+            "node": "Query Parser Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Window Buffer Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Query Parser Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Response": {
+      "main": [
+        [
+          {
+            "node": "Action Router",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Action Router": {
+      "main": [
+        [
+          {
+            "node": "Get Email Recipients",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Meeting Attendees",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Query Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Chat Assistant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Email Recipients": {
+      "main": [
+        [
+          {
+            "node": "Email Composer Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Meeting Attendees": {
+      "main": [
+        [
+          {
+            "node": "Meeting Scheduler Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Query Data": {
+      "main": [
+        [
+          {
+            "node": "Format Query Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Composer Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Email Composer Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email Composer Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Email JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Email JSON": {
+      "main": [
+        [
+          {
+            "node": "Send Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email": {
+      "main": [
+        [
+          {
+            "node": "Final Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meeting Scheduler Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Meeting Scheduler Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Meeting Scheduler Agent": {
+      "main": [
+        [
+          {
+            "node": "Parse Meeting JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Meeting JSON": {
+      "main": [
+        [
+          {
+            "node": "Create Calendar Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Calendar Event": {
+      "main": [
+        [
+          {
+            "node": "Final Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Query Response": {
+      "main": [
+        [
+          {
+            "node": "Final Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Chat Assistant": {
+      "main": [
+        [
+          {
+            "node": "Final Response Formatter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Final Response Formatter": {
+      "main": [
+        [
+          {
+            "node": "Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
