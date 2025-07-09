@@ -1,0 +1,458 @@
+{
+  "name": "Email Agent -EVA",
+  "nodes": [
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -640,
+        160
+      ],
+      "id": "82c92e7f-170b-4466-95b1-de1a79f0b381",
+      "name": "Google Gemini Chat Model1",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "workflowInputs": {
+          "values": [
+            {
+              "name": "input"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -640,
+        -120
+      ],
+      "id": "6eb16ca1-2a78-4927-b2a8-608efd0d6d33",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "84a1116b-5d7a-4a72-a0ab-4d330856ae57",
+              "name": "response",
+              "value": "={{ $json.output.replace(/([\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!])/g, '\\\\$1') }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        -260
+      ],
+      "id": "fd69364e-498f-453e-8bad-bffec53c18a4",
+      "name": "success"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "971417ca-6365-4993-b57b-035f108e34b8",
+              "name": "response",
+              "value": "=we received this error ::  {{ $json.error }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        240,
+        -80
+      ],
+      "id": "af7f38ba-f44e-443d-9fb0-ddba57f772c9",
+      "name": "error"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "email_flow",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -500,
+        160
+      ],
+      "id": "6e24bcf0-627c-4ea0-8b50-fd32d65ea8c7",
+      "name": "Memory"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "projectId": "e-cell-vishnu-website",
+        "collection": "teams"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestoreTool",
+      "typeVersion": 1.1,
+      "position": [
+        280,
+        160
+      ],
+      "id": "3dd9430c-2701-4610-9c09-9adef49bd094",
+      "name": "Get Team",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.input }}",
+        "options": {
+          "systemMessage": "=You are an email assistant. Your primary job is to manage the user's email by sending, reading, replying to, and deleting emails using Gmail. You use the Firestore database to retrieve team member contact details when adding recipients to emails.\n\n## Email Management Tools\n- **Send Email**: Use to compose and send new emails\n- **Create Draft Email**: Use to compose and draft the email\n- **Get Emails**: Use to fetch emails based on labels [\nCHAT\nDRAFT\nIMPORTANT\nINBOX\nSENT\nSPAM\nSTARRED\nTRASH\nUNREAD\n] use this labels only case sensitive or queries\n- **Reply Email**: Use to reply to an existing email (requires message ID)\n- **Delete Email**: Use to delete an email (requires message ID)\n\n## Firestore Database for Recipients\nUse the Firestore tool to get contact details (email, name, phone) for team members to add as email recipients.\n\n### Team Database Structure\n**Collection**: `teams`\nEach document contains:\n- `department`: `[\"headTable\", \"technical\", \"prHr\", \"design\", \"rAndD\", \"contentAndMedia\", \"marketing\", \"logisticsAndOperations\", \"communication\", \"videography\", \"innovation\", \"sponsorship\", \"creativity\", \"offstage\"]`\n- `designation`:\n  - Most departments: `[\"lead\", \"colead\", \"associate\"]`\n  - headTable: `[\"president\", \"vicePresident\", \"secretary\"]`\n- `name`, `email`, `phone`: Contact details for adding as recipients\n\n### Finding Team Members for Emails\nWhen users mention team members for emails, extract the department and designation:\n\n**Common Aliases**:\n- \"tech\" → \"technical\"\n- \"pr\" → \"prHr\"\n- \"r&d\", \"rnd\" → \"rAndD\"\n- \"ops\", \"operations\" → \"logisticsAndOperations\"\n- \"vid\", \"video\" → \"videography\"\n- \"comm\" → \"communication\"\n- \"cm\" → \"contentAndMedia\"\n\nExamples:\n- \"email to design lead\" → Query: department=\"design\", designation=\"lead\"\n- \"send to tech team\" → Query: department=\"technical\", all designations\n- \"pr colead email\" → Query: department=\"prHr\", designation=\"colead\"\n\n## Workflow\n1. When sending emails to team members:\n   - First, query Firestore to get their contact details\n   - Then use the email tool with retrieved recipient information\n2. Always confirm the action (e.g., 'Email sent to [recipient]')\n3. Use current date and time: {{ $now }}\n\n⚡ Operating Rules\nAsk clarification questions only when required information is missing or ambiguous.\nUse the Firestore tool whenever team members are mentioned and contact details are needed.\nOnly generate Firestore queries when the department and designation can be clearly identified or confirmed.\nFocus primarily on email management — Firestore is used exclusively for retrieving recipient contact information."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -280,
+        -120
+      ],
+      "id": "be420fe4-56e7-4362-9c0c-e89b7237a0fa",
+      "name": "Email AI",
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Return_All', ``, 'boolean') }}",
+        "limit": 10,
+        "filters": {
+          "labelIds": []
+        }
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [
+        -380,
+        160
+      ],
+      "id": "8a6e26b2-d87a-4376-a91e-686f7d346282",
+      "name": "Get All",
+      "webhookId": "21a9d4b4-bac3-4fc2-836b-4c7d88f8f485",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "K2FJCacoRq9WcjdZ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('To', ``, 'string') }}",
+        "subject": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Subject', ``, 'string') }}",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {
+          "bccList": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('BCC', ``, 'string') }}",
+          "ccList": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('CC', ``, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [
+        -260,
+        160
+      ],
+      "id": "89b05f83-bed1-4187-8a05-c66795db3093",
+      "name": "Send",
+      "webhookId": "ae7aa47b-8283-49a5-b319-9167514b93cf",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "K2FJCacoRq9WcjdZ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message_ID', ``, 'string') }}",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {
+          "bccList": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('BCC', ``, 'string') }}",
+          "ccList": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('CC', ``, 'string') }}"
+        }
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [
+        140,
+        160
+      ],
+      "id": "f263ffdc-b3bf-481f-8846-1565c8a0bd92",
+      "name": "Reply",
+      "webhookId": "db3159b4-ffb6-46d8-b8ee-c1380ee5e39a",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "K2FJCacoRq9WcjdZ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "messageId": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message_ID', ``, 'string') }}"
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [
+        20,
+        160
+      ],
+      "id": "e09e7b9d-9244-47ed-b3b8-84967c0bd123",
+      "name": "Delete",
+      "webhookId": "95dd4b02-e929-4b02-878b-5c2e7b3a5ebf",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "K2FJCacoRq9WcjdZ",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1020,
+        40
+      ],
+      "id": "a946bfe7-beb5-4b34-b49b-94107cf1b2c1",
+      "name": "Telegram Trigger",
+      "webhookId": "db135ad7-bb18-4017-b871-d414652c19a4",
+      "credentials": {
+        "telegramApi": {
+          "id": "XJugLwWoSLTgN3ip",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.response }}",
+        "additionalFields": {
+          "parse_mode": "MarkdownV2"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        600,
+        -180
+      ],
+      "id": "974d84e6-1b91-4e86-ab86-0233bf577456",
+      "name": "Telegram",
+      "webhookId": "ab0d3d86-81ad-49ff-9ff1-84ca0bfc87ec",
+      "credentials": {
+        "telegramApi": {
+          "id": "XJugLwWoSLTgN3ip",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "draft",
+        "subject": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Subject', ``, 'string') }}",
+        "message": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Message', ``, 'string') }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmailTool",
+      "typeVersion": 2.1,
+      "position": [
+        -140,
+        160
+      ],
+      "id": "9b111dd9-8bb3-45a0-ab74-f42b4852f004",
+      "name": "Draft",
+      "webhookId": "e01937d9-db38-4d4b-89d4-a98c07aca67c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "K2FJCacoRq9WcjdZ",
+          "name": "Gmail account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Google Gemini Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "Email AI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Team": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Email AI": {
+      "main": [
+        [
+          {
+            "node": "success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get All": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Telegram Trigger": {
+      "main": [
+        []
+      ]
+    },
+    "success": {
+      "main": [
+        []
+      ]
+    },
+    "error": {
+      "main": [
+        []
+      ]
+    },
+    "Draft": {
+      "ai_tool": [
+        [
+          {
+            "node": "Email AI",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "673ea242-4d89-47bf-ba33-53c69bf08530",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "250c8b74a338318767c63314541365109b8bae7884022431d1006ca3ca27cbe9"
+  },
+  "id": "8ja332CbpIxHKYPb",
+  "tags": []
+}

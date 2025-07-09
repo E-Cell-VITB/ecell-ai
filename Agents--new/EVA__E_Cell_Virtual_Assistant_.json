@@ -1,0 +1,330 @@
+{
+  "name": "EVA (E-Cell Virtual Assistant)",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -400,
+        -160
+      ],
+      "id": "1901be8c-3d75-4847-951a-d0ca7f36cac9",
+      "name": "Telegram Trigger",
+      "webhookId": "d7ac08cf-a6d1-4812-86e2-60a13c47441f",
+      "credentials": {
+        "telegramApi": {
+          "id": "XJugLwWoSLTgN3ip",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $json.message.text }}",
+        "options": {
+          "systemMessage": "=You are an intelligent internal assistant for the E-Cell admin team.\nYour core responsibility is to interpret user input and route tasks to the appropriate modules:\n\nEmail Agent: For sending, reading, replying to, and deleting emails using Gmail.\n\nCalendar Agent: For scheduling and managing meetings or events\n\nFirestore Tool: For querying team member details (departments, designations, and contacts)\n\n🔍 Task Routing Guidelines:\nIf the user input mentions sending an email, use the Email Agent\nIf the user input involves meetings, events, or scheduling, use the Calendar Agent\nIf the user input requests information about team members or roles, directly use the Firestore Tool\n\n\n## Firestore Database \nUse the Firestore tool to get contact details (email, name, phone) for team members.\n\n### Team Database Structure\n**Collection**: `teams`\nEach document contains:\n- `department`: `[\"headTable\", \"technical\", \"prHr\", \"design\", \"rAndD\", \"contentAndMedia\", \"marketing\", \"logisticsAndOperations\", \"communication\", \"videography\", \"innovation\", \"sponsorship\", \"creativity\", \"offstage\"]`\n- `designation`:\n  - Most departments: `[\"lead\", \"colead\", \"associate\"]`\n  - headTable: `[\"president\", \"vicePresident\", \"secretary\"]`\n- `name`, `email`, `phone`: Contact details for adding as recipients\n\n### Finding Team Members for query related to team details, extract the department and designation:\n\n**Common Aliases**:\n- \"tech\" → \"technical\"\n- \"pr\" → \"prHr\"\n- \"r&d\", \"rnd\" → \"rAndD\"\n- \"ops\", \"operations\" → \"logisticsAndOperations\"\n- \"vid\", \"video\" → \"videography\"\n- \"comm\" → \"communication\"\n- \"cm\" → \"contentAndMedia\"\n\nExamples:\n- \"design lead details\" → Query: department=\"design\", designation=\"lead\"\n- \"tech team details or information\" → Query: department=\"technical\", all designations\n- \"who's the secretary\" → Query department=\"headTable\", designation=\"secretary\"\n- \"pr colead information\" → Query: department=\"prHr\", designation=\"colead\"\n\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 2,
+      "position": [
+        -40,
+        -160
+      ],
+      "id": "de6b7f9c-852c-41fb-b952-3838f52956b2",
+      "name": "EVA"
+    },
+    {
+      "parameters": {
+        "description": "call this tool ::: Manages meetings and events. Use this tool to schedule internal sessions, add calendar entries, or send meeting invites",
+        "workflowId": {
+          "__rl": true,
+          "value": "4YzbVZwkt9RcKXXx",
+          "mode": "list",
+          "cachedResultName": "Calendar Agent -EVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "input": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('input', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "input"
+          ],
+          "schema": [
+            {
+              "id": "input",
+              "displayName": "input",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        20,
+        100
+      ],
+      "id": "53572432-2602-483b-a5cf-e89e988c9327",
+      "name": "Calendar Agent"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "projectId": "e-cell-vishnu-website",
+        "collection": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Collection', ``, 'string') }}",
+        "returnAll": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Return_All', ``, 'boolean') }}"
+      },
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestoreTool",
+      "typeVersion": 1.1,
+      "position": [
+        440,
+        80
+      ],
+      "id": "694c83fb-74c3-4b31-b229-4ed9d21f5a71",
+      "name": "Firestore",
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "E7DhiARwY7uJiv4B",
+          "name": "Google Firebase Cloud Firestore account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.0-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        -300,
+        80
+      ],
+      "id": "a34d735b-a38f-463a-b096-e48681037563",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "2Wup3Nuz2VwNq2SP",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "={{ $json.output.replace(/([\\_\\*\\[\\]\\(\\)\\~\\`\\>\\#\\+\\-\\=\\|\\{\\}\\.\\!])/g, '\\\\$1') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "MarkdownV2"
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        660,
+        -160
+      ],
+      "id": "221113ad-f083-4c7e-bdea-c313cd488003",
+      "name": "Telegram",
+      "webhookId": "eaf4af9c-bdbf-4c40-9851-0087fe173fe0",
+      "credentials": {
+        "telegramApi": {
+          "id": "XJugLwWoSLTgN3ip",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "description": "use this tool for email related operations",
+        "workflowId": {
+          "__rl": true,
+          "value": "8ja332CbpIxHKYPb",
+          "mode": "list",
+          "cachedResultName": "Email Agent -EVA"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "input": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('input', ``, 'string') }}"
+          },
+          "matchingColumns": [
+            "input"
+          ],
+          "schema": [
+            {
+              "id": "input",
+              "displayName": "input",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string",
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 2.2,
+      "position": [
+        340,
+        80
+      ],
+      "id": "f83952b5-2e7c-4f2f-9dd9-63ee36021f1d",
+      "name": "email agent"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "199",
+        "contextWindowLength": 10
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [
+        -140,
+        100
+      ],
+      "id": "406a0075-ec1d-48e5-9828-b23b984f9aaa",
+      "name": "Simple Memory"
+    }
+  ],
+  "pinData": {
+    "Telegram Trigger": [
+      {
+        "json": {
+          "update_id": 492137225,
+          "message": {
+            "message_id": 102,
+            "from": {
+              "id": 5450207367,
+              "is_bot": false,
+              "first_name": "Ñãrãsímhã Ñãìdú",
+              "last_name": "Kõrrãpãtí",
+              "username": "Naidu2004",
+              "language_code": "en"
+            },
+            "chat": {
+              "id": 5450207367,
+              "first_name": "Ñãrãsímhã Ñãìdú",
+              "last_name": "Kõrrãpãtí",
+              "username": "Naidu2004",
+              "type": "private"
+            },
+            "date": 1750066793,
+            "text": "What is latest email only one"
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "EVA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calendar Agent": {
+      "ai_tool": [
+        [
+          {
+            "node": "EVA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firestore": {
+      "ai_tool": [
+        [
+          {
+            "node": "EVA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "EVA": {
+      "main": [
+        [
+          {
+            "node": "Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "EVA",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "email agent": {
+      "ai_tool": [
+        [
+          {
+            "node": "EVA",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "EVA",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "d32be2ba-bd02-4d36-bd70-553714d3ff68",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "250c8b74a338318767c63314541365109b8bae7884022431d1006ca3ca27cbe9"
+  },
+  "id": "Q3TtplWHW0l7zjwL",
+  "tags": []
+}

@@ -1,0 +1,235 @@
+{
+
+  "name": "Firestore AI Agent Workflow",
+  "description": "A workflow that uses AI to extract department and designation from user queries and fetches data from a Firestore database.",
+  "version": 1,
+  "nodes": [
+    {
+      "parameters": {
+        "options": {
+          "loadPreviousSession": true
+        }
+      },
+      "id": "1",
+      "name": "Chat Trigger",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "model": "gpt-4o-mini",
+        "options": {},
+        "systemPromptTemplate": "You are an assistant that extracts department and designation from user queries to fetch data from a Firestore database. The database has a 'teams' collection with documents containing 'department' (enum: headTable, technical, prHr, design, rAndD, contentAndMedia, marketing, logisticsAndOperations, communication, videography, innovation, sponsorship, creativity, offstage) and 'designation' (enum: lead, colead, associate for most departments; president, vicePresident, secretary for headTable). For queries like 'tech lead', identify department='technical' and designation='lead'. For 'president', assume department='headTable' and designation='president'. Output a JSON object with 'department' and 'designation' fields, e.g., {\"department\": \"technical\", \"designation\": \"lead\"}. If the query is unclear, return an empty object {}.",
+        "promptType": "define",
+        "text": "={{ $json.chatInput }}"
+      },
+      "id": "2",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "ai_credential_id_placeholder",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the AI response to extract JSON\nlet aiResponse = $('OpenAI Chat Model').first().json.text || '';\n\n// Try to extract JSON from the response\nlet parsedData = {};\ntry {\n  // Look for JSON in the response\n  const jsonMatch = aiResponse.match(/\\{[^}]*\\}/);\n  if (jsonMatch) {\n    parsedData = JSON.parse(jsonMatch[0]);\n  }\n} catch (error) {\n  console.log('Error parsing AI response:', error);\n}\n\nconst validDepartments = [\n  \"headTable\", \"technical\", \"prHr\", \"design\", \"rAndD\", \"contentAndMedia\",\n  \"marketing\", \"logisticsAndOperations\", \"communication\", \"videography\",\n  \"innovation\", \"sponsorship\", \"creativity\", \"offstage\"\n];\nconst validDesignations = [\"lead\", \"colead\", \"associate\", \"president\", \"vicePresident\", \"secretary\"];\n\nlet department = parsedData.department ? parsedData.department.toLowerCase() : \"\";\nlet designation = parsedData.designation ? parsedData.designation.toLowerCase() : \"\";\n\n// Department mapping for common aliases\nconst departmentMap = {\n  \"tech\": \"technical\",\n  \"pr\": \"prHr\",\n  \"hr\": \"prHr\",\n  \"rnd\": \"rAndD\",\n  \"content\": \"contentAndMedia\",\n  \"media\": \"contentAndMedia\",\n  \"logistics\": \"logisticsAndOperations\",\n  \"operations\": \"logisticsAndOperations\",\n  \"video\": \"videography\"\n};\n\n// If no department specified but designation is executive, assume headTable\nif (!department && [\"president\", \"vicepresident\", \"secretary\"].includes(designation)) {\n  department = \"headTable\";\n}\n\n// Apply department mapping\ndepartment = departmentMap[department] || department;\n\n// Validate department and designation\nif (!validDepartments.includes(department)) {\n  department = \"\";\n}\nif (!validDesignations.includes(designation)) {\n  designation = \"\";\n}\n\nreturn { department, designation };"
+      },
+      "id": "3",
+      "name": "Normalize Query",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false
+          },
+          "conditions": [
+            {
+              "id": "condition1",
+              "leftValue": "={{ $json.department }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEqual"
+              }
+            }
+          ]
+        },
+        "options": {
+          "outputNames": ["With Department", "Without Department"]
+        }
+      },
+      "id": "4",
+      "name": "Switch",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "={{ $vars.GOOGLE_CLOUD_PROJECT_ID }}",
+        "collection": "teams",
+        "query": {
+          "filters": [
+            {
+              "field": "department",
+              "operator": "==",
+              "value": "={{ $json.department }}"
+            },
+            {
+              "field": "designation",
+              "operator": "==",
+              "value": "={{ $json.designation }}"
+            }
+          ]
+        },
+        "limit": 10
+      },
+      "id": "5",
+      "name": "Firestore Query With Department",
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 2,
+      "position": [1120, 200],
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "credential_id_placeholder",
+          "name": "Google Cloud Firestore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "query",
+        "projectId": "={{ $vars.GOOGLE_CLOUD_PROJECT_ID }}",
+        "collection": "teams",
+        "query": {
+          "filters": [
+            {
+              "field": "designation",
+              "operator": "==",
+              "value": "={{ $json.designation }}"
+            }
+          ]
+        },
+        "limit": 10
+      },
+      "id": "6",
+      "name": "Firestore Query Without Department",
+      "type": "n8n-nodes-base.googleFirebaseCloudFirestore",
+      "typeVersion": 2,
+      "position": [1120, 400],
+      "credentials": {
+        "googleFirebaseCloudFirestoreOAuth2Api": {
+          "id": "credential_id_placeholder",
+          "name": "Google Cloud Firestore"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get all input items from both Firestore queries\nconst items = $input.all();\n\nif (!items || items.length === 0) {\n  return { chatResponse: 'No matching users found.' };\n}\n\n// Format the response\nconst formattedUsers = items.map(item => {\n  const data = item.json;\n  return `${data.name || 'N/A'}, ${data.email || 'N/A'}, ${data.phone_number || 'N/A'}`;\n}).join('\\n');\n\nreturn { chatResponse: formattedUsers };"
+      },
+      "id": "7",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "sessionIdType": "fromInput",
+        "sessionKey": "={{ $json.sessionId }}"
+      },
+      "id": "8",
+      "name": "Window Buffer Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1,
+      "position": [460, 500]
+    }
+  ],
+  "connections": {
+    "Chat Trigger": {
+      "main": [
+        [
+          {
+            "node": "OpenAI Chat Model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "main": [
+        [
+          {
+            "node": "Normalize Query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Query": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Firestore Query With Department",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Firestore Query Without Department",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firestore Query With Department": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Firestore Query Without Department": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}
